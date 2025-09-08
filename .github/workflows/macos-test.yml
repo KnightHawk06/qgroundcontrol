@@ -7,7 +7,7 @@ on:
   pull_request:
 
 env:
-  QT_VERSION: "6.5.3"   # adjust if your project expects a different Qt 6.x
+  QT_VERSION: "6.5.3"   # adjust if QGC needs a different 6.x
 
 jobs:
   build-macos:
@@ -15,8 +15,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Use an isolated Python, not the Homebrew-managed one (avoids PEP 668)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Show toolchain
         run: |
+          which python3
+          python3 --version
           which cmake || true
           cmake --version || true
           uname -a
@@ -29,9 +37,10 @@ jobs:
 
       - name: Install aqtinstall (Qt downloader)
         run: |
-          python3 -m pip install --user --upgrade aqtinstall
+          python3 -m pip install --upgrade pip
+          python3 -m pip install aqtinstall
 
-      - name: Install Qt ${{ env.QT_VERSION }} with modules (no Homebrew)
+      - name: Install Qt ${{ env.QT_VERSION }} (no Homebrew)
         run: |
           if [ ! -d "$HOME/Qt/${QT_VERSION}/macos" ]; then
             python3 -m aqt install-qt mac desktop "${QT_VERSION}" -O "$HOME/Qt" \
@@ -39,7 +48,7 @@ jobs:
           fi
           ls -la "$HOME/Qt/${QT_VERSION}/macos"
 
-      - name: Ensure Ninja exists (preinstalled on runner)
+      - name: Ensure Ninja exists
         run: |
           ninja --version || brew install ninja
 
