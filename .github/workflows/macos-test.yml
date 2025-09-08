@@ -15,17 +15,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python (avoid PEP 668)
+      # Use isolated Python so pip works (avoids PEP 668)
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Toolchain info
         run: |
-          which python3
-          python3 --version
           which cmake || true
           cmake --version || true
+          which ninja || true
+          ninja --version || true
+          python3 --version
           uname -a
 
       - name: Cache Qt
@@ -39,8 +41,7 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install aqtinstall
 
-      # Optional: list available modules for visibility
-      - name: List available Qt modules
+      - name: List available Qt modules (for visibility)
         run: |
           python3 -m aqt list-qt mac desktop "${QT_VERSION}" --modules macos
 
@@ -48,15 +49,10 @@ jobs:
         run: |
           set -eux
           if [ ! -d "$HOME/Qt/${QT_VERSION}/macos" ]; then
-            # Note: include the arch 'macos' before options; modules are space-separated
             python3 -m aqt install-qt mac desktop "${QT_VERSION}" macos -O "$HOME/Qt" \
               -m qtdeclarative qtquickcontrols2 qtpositioning qtserialport qtmultimedia qtsvg qtlocation qtshadertools
           fi
           ls -la "$HOME/Qt/${QT_VERSION}/macos"
-
-      - name: Ensure Ninja
-        run: |
-          ninja --version || brew install ninja
 
       - name: Configure (CMake + Qt6)
         env:
