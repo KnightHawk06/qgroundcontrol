@@ -23,6 +23,7 @@ jobs:
 
       - name: Toolchain info
         run: |
+          set -eux
           uname -a
           which cmake || true
           cmake --version || true
@@ -38,6 +39,7 @@ jobs:
 
       - name: Install aqtinstall
         run: |
+          set -eux
           python3 -m pip install --upgrade pip
           python3 -m pip install aqtinstall
 
@@ -45,18 +47,21 @@ jobs:
         id: qarch
         run: |
           set -eux
-          ARCHO="$(python3 -m aqt list-qt mac desktop --arch "${QT_VERSION}" | tr -s ' ' '\n' | sed 's/\r$//')"
-          echo "Available Qt archs for ${QT_VERSION}:"
-          echo "${ARCHO}"
-          if echo "${ARCHO}" | grep -qx "clang_64"; then
-            Q_ARCH="clang_64"
+          # Query available architectures for the requested Qt version
+          if python3 -m aqt list-qt mac desktop --arch "${QT_VERSION}" > arch.txt 2>/dev/null; then
+            cat arch.txt
+            if grep -qx "clang_64" arch.txt; then
+              Q_ARCH="clang_64"
+            else
+              Q_ARCH="$(head -n1 arch.txt)"
+            fi
           else
-            # Fallback: first listed arch
-            Q_ARCH="$(echo "${ARCHO}" | head -n1)"
+            # Fallback to clang_64 if listing fails
+            Q_ARCH="clang_64"
           fi
           echo "Using Qt arch: ${Q_ARCH}"
           echo "Q_ARCH=${Q_ARCH}" >> "$GITHUB_OUTPUT"
-          # Show modules for visibility (don't fail job if none)
+          # List available modules for visibility (non-fatal)
           python3 -m aqt list-qt mac desktop --modules "${QT_VERSION}" "${Q_ARCH}" || true
 
       - name: Install Qt (aqt, no Homebrew)
@@ -64,7 +69,7 @@ jobs:
           Q_ARCH: ${{ steps.qarch.outputs.Q_ARCH }}
         run: |
           set -eux
-          QT_DIR="$HOME/Qt/${QT_VERSION}/${Q_ARCH}"
+          QT_DIR="$HOME/Qt/${QT_VERSION}/macos"   # aqt lays mac desktop Qt out under 'macos'
           if [ ! -d "$QT_DIR" ]; then
             WANT="qtdeclarative qtquickcontrols2 qtpositioning qtserialport qtmultimedia qtsvg qtlocation qtshadertools qtimageformats qt5compat"
             AVAIL="$(python3 -m aqt list-qt mac desktop --modules "${QT_VERSION}" "${Q_ARCH}" | tr -s ' ' '\n' | sed 's/\r$//' || true)"
@@ -83,14 +88,17 @@ jobs:
             fi
           fi
           ls -la "$QT_DIR"
+          ls -la "$QT_DIR/bin" || true
+          "$QT_DIR/bin/qmake" -v || true
 
       - name: Ensure Ninja (no Homebrew)
         run: |
+          set -eux
           ninja --version || python3 -m pip install ninja
 
       - name: Configure (CMake + Qt6)
         env:
-          CMAKE_PREFIX_PATH: ${{ runner.home }}/Qt/${{ env.QT_VERSION }}/${{ steps.qarch.outputs.Q_ARCH }}
+          CMAKE_PREFIX_PATH: ${{ runner.home }}/Qt/${{ env.QT_VERSION }}/macos
         run: |
           set -eux
           mkdir -p build
