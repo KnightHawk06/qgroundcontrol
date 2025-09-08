@@ -7,7 +7,7 @@ on:
   pull_request:
 
 env:
-  QT_VERSION: "6.5.3"   # adjust if QGC needs a different 6.x
+  QT_VERSION: "6.5.3"
 
 jobs:
   build-macos:
@@ -15,13 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Use an isolated Python, not the Homebrew-managed one (avoids PEP 668)
-      - name: Set up Python
+      - name: Set up Python (avoid PEP 668)
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Show toolchain
+      - name: Toolchain info
         run: |
           which python3
           python3 --version
@@ -35,20 +34,27 @@ jobs:
           path: ~/Qt
           key: qt-${{ runner.os }}-${{ env.QT_VERSION }}
 
-      - name: Install aqtinstall (Qt downloader)
+      - name: Install aqtinstall
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install aqtinstall
 
-      - name: Install Qt ${{ env.QT_VERSION }} (no Homebrew)
+      # Optional: list available modules for visibility
+      - name: List available Qt modules
         run: |
+          python3 -m aqt list-qt mac desktop "${QT_VERSION}" --modules macos
+
+      - name: Install Qt (aqt, no Homebrew)
+        run: |
+          set -eux
           if [ ! -d "$HOME/Qt/${QT_VERSION}/macos" ]; then
-            python3 -m aqt install-qt mac desktop "${QT_VERSION}" -O "$HOME/Qt" \
-              --modules qtdeclarative,qtquickcontrols2,qtpositioning,qtserialport,qtmultimedia,qtsvg,qtlocation,qtshadertools
+            # Note: include the arch 'macos' before options; modules are space-separated
+            python3 -m aqt install-qt mac desktop "${QT_VERSION}" macos -O "$HOME/Qt" \
+              -m qtdeclarative qtquickcontrols2 qtpositioning qtserialport qtmultimedia qtsvg qtlocation qtshadertools
           fi
           ls -la "$HOME/Qt/${QT_VERSION}/macos"
 
-      - name: Ensure Ninja exists
+      - name: Ensure Ninja
         run: |
           ninja --version || brew install ninja
 
@@ -56,6 +62,7 @@ jobs:
         env:
           CMAKE_PREFIX_PATH: ${{ runner.home }}/Qt/${{ env.QT_VERSION }}/macos
         run: |
+          set -eux
           mkdir -p build
           cd build
           cmake .. \
@@ -64,5 +71,6 @@ jobs:
 
       - name: Build
         run: |
+          set -eux
           cd build
           ninja -v
