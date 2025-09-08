@@ -15,7 +15,8 @@ jobs:
       - name: Install dependencies
         run: |
           brew update
-          brew install cmake ninja qt@6
+          brew upgrade cmake
+          brew install ninja qt@6
           echo "Qt installed at $(brew --prefix qt@6)"
 
       - name: Configure CMake
