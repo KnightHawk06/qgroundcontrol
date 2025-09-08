@@ -16,8 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Isolated Python; avoids PEP 668 and lets us pip install aqt
-      - name: Set up Python
+      - name: Set up Python (isolated; avoids PEP 668)
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -25,7 +24,6 @@ jobs:
       - name: Toolchain info
         run: |
           uname -a
-          echo "Machine arch: $(uname -m)"
           which cmake || true
           cmake --version || true
           which ninja || true
@@ -43,33 +41,33 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install aqtinstall
 
-      # Determine Qt arch for this runner and show what’s available
-      - name: Determine Qt architecture and list modules
+      - name: Determine Qt arch (prefer clang_64) and list modules
         id: qarch
         run: |
           set -eux
-          ARCH="$(uname -m)"
-          if [ "$ARCH" = "x86_64" ]; then
+          ARCHO="$(python3 -m aqt list-qt mac desktop --arch "${QT_VERSION}" | tr -s ' ' '\n' | sed 's/\r$//')"
+          echo "Available Qt archs for ${QT_VERSION}:"
+          echo "${ARCHO}"
+          if echo "${ARCHO}" | grep -qx "clang_64"; then
             Q_ARCH="clang_64"
           else
-            Q_ARCH="arm64"
+            # Fallback: first listed arch
+            Q_ARCH="$(echo "${ARCHO}" | head -n1)"
           fi
-          echo "Q_ARCH=$Q_ARCH" >> $GITHUB_OUTPUT
-          echo "Using Qt arch: $Q_ARCH"
-          python3 -m aqt list-qt mac desktop --arch "${QT_VERSION}"
-          python3 -m aqt list-qt mac desktop --modules "${QT_VERSION}" "$Q_ARCH" || true
+          echo "Using Qt arch: ${Q_ARCH}"
+          echo "Q_ARCH=${Q_ARCH}" >> "$GITHUB_OUTPUT"
+          # Show modules for visibility (don't fail job if none)
+          python3 -m aqt list-qt mac desktop --modules "${QT_VERSION}" "${Q_ARCH}" || true
 
-      - name: Install Qt (auto-select available modules)
+      - name: Install Qt (aqt, no Homebrew)
         env:
           Q_ARCH: ${{ steps.qarch.outputs.Q_ARCH }}
         run: |
           set -eux
           QT_DIR="$HOME/Qt/${QT_VERSION}/${Q_ARCH}"
           if [ ! -d "$QT_DIR" ]; then
-            # Desired modules; we'll intersect with what is actually available for the arch
             WANT="qtdeclarative qtquickcontrols2 qtpositioning qtserialport qtmultimedia qtsvg qtlocation qtshadertools qtimageformats qt5compat"
-            AVAIL="$(python3 -m aqt list-qt mac desktop --modules "${QT_VERSION}" "${Q_ARCH}" \
-                     | tr -s ' ' '\n' | sed 's/\r$//' || true)"
+            AVAIL="$(python3 -m aqt list-qt mac desktop --modules "${QT_VERSION}" "${Q_ARCH}" | tr -s ' ' '\n' | sed 's/\r$//' || true)"
             HAVE=""
             for m in $WANT; do
               if echo "$AVAIL" | grep -q "^${m}$"; then
@@ -80,14 +78,13 @@ jobs:
               echo "Installing Qt ${QT_VERSION} ${Q_ARCH} with modules:$HAVE"
               python3 -m aqt install-qt mac desktop "${QT_VERSION}" "${Q_ARCH}" -O "$HOME/Qt" -m $HAVE
             else
-              echo "No desired modules reported as available; installing core Qt ${QT_VERSION} ${Q_ARCH}"
+              echo "Installing core Qt ${QT_VERSION} ${Q_ARCH}"
               python3 -m aqt install-qt mac desktop "${QT_VERSION}" "${Q_ARCH}" -O "$HOME/Qt"
             fi
           fi
           ls -la "$QT_DIR"
 
-      # Ensure Ninja exists without Homebrew; pip fallback if missing
-      - name: Ensure Ninja
+      - name: Ensure Ninja (no Homebrew)
         run: |
           ninja --version || python3 -m pip install ninja
 
@@ -98,9 +95,7 @@ jobs:
           set -eux
           mkdir -p build
           cd build
-          cmake .. \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: |
