@@ -11,12 +11,12 @@ env:
 
 jobs:
   build-macos:
-    if: github.ref == 'refs/heads/issue-7133-macos-test'  # ensure only this branch runs this job
+    if: github.ref == 'refs/heads/issue-7133-macos-test'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Isolated Python so pip works (avoids PEP 668)
+      # Isolated Python; avoids PEP 668 and lets us pip install aqt
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -24,12 +24,13 @@ jobs:
 
       - name: Toolchain info
         run: |
+          uname -a
+          echo "Machine arch: $(uname -m)"
           which cmake || true
           cmake --version || true
           which ninja || true
           ninja --version || true
           python3 --version
-          uname -a
 
       - name: Cache Qt
         uses: actions/cache@v4
@@ -42,28 +43,57 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install aqtinstall
 
-      # Correct syntax: --modules <VERSION> <ARCH>
-      - name: List available Qt modules
-        run: |
-          python3 -m aqt list-qt mac desktop --modules "${QT_VERSION}" macos
-
-      - name: Install Qt (aqt, no Homebrew)
+      # Determine Qt arch for this runner and show what’s available
+      - name: Determine Qt architecture and list modules
+        id: qarch
         run: |
           set -eux
-          if [ ! -d "$HOME/Qt/${QT_VERSION}/macos" ]; then
-            python3 -m aqt install-qt mac desktop "${QT_VERSION}" macos -O "$HOME/Qt" \
-              -m qtdeclarative qtquickcontrols2 qtpositioning qtserialport qtmultimedia qtsvg qtlocation qtshadertools
+          ARCH="$(uname -m)"
+          if [ "$ARCH" = "x86_64" ]; then
+            Q_ARCH="clang_64"
+          else
+            Q_ARCH="arm64"
           fi
-          ls -la "$HOME/Qt/${QT_VERSION}/macos"
+          echo "Q_ARCH=$Q_ARCH" >> $GITHUB_OUTPUT
+          echo "Using Qt arch: $Q_ARCH"
+          python3 -m aqt list-qt mac desktop --arch "${QT_VERSION}"
+          python3 -m aqt list-qt mac desktop --modules "${QT_VERSION}" "$Q_ARCH" || true
 
-      # Avoid Homebrew entirely. Fallback installs ninja from PyPI if missing.
-      - name: Ensure Ninja (no Homebrew)
+      - name: Install Qt (auto-select available modules)
+        env:
+          Q_ARCH: ${{ steps.qarch.outputs.Q_ARCH }}
+        run: |
+          set -eux
+          QT_DIR="$HOME/Qt/${QT_VERSION}/${Q_ARCH}"
+          if [ ! -d "$QT_DIR" ]; then
+            # Desired modules; we'll intersect with what is actually available for the arch
+            WANT="qtdeclarative qtquickcontrols2 qtpositioning qtserialport qtmultimedia qtsvg qtlocation qtshadertools qtimageformats qt5compat"
+            AVAIL="$(python3 -m aqt list-qt mac desktop --modules "${QT_VERSION}" "${Q_ARCH}" \
+                     | tr -s ' ' '\n' | sed 's/\r$//' || true)"
+            HAVE=""
+            for m in $WANT; do
+              if echo "$AVAIL" | grep -q "^${m}$"; then
+                HAVE="$HAVE $m"
+              fi
+            done
+            if [ -n "$HAVE" ]; then
+              echo "Installing Qt ${QT_VERSION} ${Q_ARCH} with modules:$HAVE"
+              python3 -m aqt install-qt mac desktop "${QT_VERSION}" "${Q_ARCH}" -O "$HOME/Qt" -m $HAVE
+            else
+              echo "No desired modules reported as available; installing core Qt ${QT_VERSION} ${Q_ARCH}"
+              python3 -m aqt install-qt mac desktop "${QT_VERSION}" "${Q_ARCH}" -O "$HOME/Qt"
+            fi
+          fi
+          ls -la "$QT_DIR"
+
+      # Ensure Ninja exists without Homebrew; pip fallback if missing
+      - name: Ensure Ninja
         run: |
           ninja --version || python3 -m pip install ninja
 
       - name: Configure (CMake + Qt6)
         env:
-          CMAKE_PREFIX_PATH: ${{ runner.home }}/Qt/${{ env.QT_VERSION }}/macos
+          CMAKE_PREFIX_PATH: ${{ runner.home }}/Qt/${{ env.QT_VERSION }}/${{ steps.qarch.outputs.Q_ARCH }}
         run: |
           set -eux
           mkdir -p build
