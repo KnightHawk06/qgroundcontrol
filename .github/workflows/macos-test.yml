@@ -11,11 +11,12 @@ env:
 
 jobs:
   build-macos:
+    if: github.ref == 'refs/heads/issue-7133-macos-test'  # ensure only this branch runs this job
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Use isolated Python so pip works (avoids PEP 668)
+      # Isolated Python so pip works (avoids PEP 668)
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -41,9 +42,10 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install aqtinstall
 
-      - name: List available Qt modules (for visibility)
+      # Correct syntax: --modules <VERSION> <ARCH>
+      - name: List available Qt modules
         run: |
-          python3 -m aqt list-qt mac desktop "${QT_VERSION}" --modules macos
+          python3 -m aqt list-qt mac desktop --modules "${QT_VERSION}" macos
 
       - name: Install Qt (aqt, no Homebrew)
         run: |
@@ -53,6 +55,11 @@ jobs:
               -m qtdeclarative qtquickcontrols2 qtpositioning qtserialport qtmultimedia qtsvg qtlocation qtshadertools
           fi
           ls -la "$HOME/Qt/${QT_VERSION}/macos"
+
+      # Avoid Homebrew entirely. Fallback installs ninja from PyPI if missing.
+      - name: Ensure Ninja (no Homebrew)
+        run: |
+          ninja --version || python3 -m pip install ninja
 
       - name: Configure (CMake + Qt6)
         env:
