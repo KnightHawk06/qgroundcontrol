@@ -7,7 +7,8 @@ on:
   pull_request:
 
 env:
-  QT_VERSION: "6.5.3"
+  # Match the exact version your CMake requires:
+  QT_VERSION: "6.8.3"
 
 jobs:
   build-macos:
@@ -16,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Use an isolated Python so pip works (avoids PEP 668). No Homebrew used anywhere.
+      # Isolated Python so pip works (avoids PEP 668). We do NOT use Homebrew anywhere.
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -44,29 +45,34 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install aqtinstall
 
-      # Discover valid Qt architectures and pick one (prefer clang_64 for mac desktop).
-      - name: Determine Qt arch (prefer clang_64) and list modules
+      # Discover valid Qt architectures for this Qt version and pick one.
+      # For mac desktop, aqt typically offers "macos" (universal) or "clang_64".
+      - name: Determine Qt arch and list modules
         id: qarch
         run: |
           set -eux
           ARCH_LINE="$(python3 -m aqt list-qt mac desktop --arch "${QT_VERSION}")"
           echo "Raw arch line: ${ARCH_LINE}"
           echo "${ARCH_LINE}" | tr -s ' \t' ' ' | tr ' ' '\n' > arch.txt
-          echo "Available Qt arches:"
+          echo "Available Qt arches for ${QT_VERSION}:"
           cat arch.txt
 
-          if grep -qx "clang_64" arch.txt; then
+          # Prefer 'macos' (universal). If not present, fall back to 'clang_64', else first entry.
+          if grep -qx "macos" arch.txt; then
+            Q_ARCH="macos"
+          elif grep -qx "clang_64" arch.txt; then
             Q_ARCH="clang_64"
           else
             Q_ARCH="$(head -n1 arch.txt)"
           fi
+
           echo "Selected Qt arch: ${Q_ARCH}"
           echo "Q_ARCH=${Q_ARCH}" >> "$GITHUB_OUTPUT"
 
-          # Show modules for visibility (do not fail if none listed)
+          # List modules for visibility (non-fatal)
           python3 -m aqt list-qt mac desktop --modules "${QT_VERSION}" "${Q_ARCH}" || true
 
-      # Install Qt with aqt; handle aqt's actual install path (usually ~/Qt/<ver>/macos).
+      # Install Qt with aqt; aqt often installs mac desktop Qt under ~/Qt/<ver>/macos even if we select clang_64.
       - name: Install Qt (aqt, no Homebrew)
         id: qtpath
         env:
@@ -74,6 +80,8 @@ jobs:
         run: |
           set -eux
           WANT="qtdeclarative qtquickcontrols2 qtpositioning qtserialport qtmultimedia qtsvg qtlocation qtshadertools qtimageformats qt5compat"
+
+          # Which modules are available for this version/arch?
           AVAIL="$(python3 -m aqt list-qt mac desktop --modules "${QT_VERSION}" "${Q_ARCH}" | tr -s ' \t' ' ' | tr ' ' '\n' | sed 's/\r$//' || true)"
           echo "Available modules for ${QT_VERSION} ${Q_ARCH}:"
           echo "${AVAIL}"
@@ -85,9 +93,11 @@ jobs:
             fi
           done
 
+          # Install only if not already present
           if [ ! -d "$HOME/Qt/${QT_VERSION}/macos" ] && [ ! -d "$HOME/Qt/${QT_VERSION}/${Q_ARCH}" ]; then
             if [ -n "${HAVE}" ]; then
               echo "Installing Qt ${QT_VERSION} ${Q_ARCH} with modules:${HAVE}"
+              # shellcheck disable=SC2086
               python3 -m aqt install-qt mac desktop "${QT_VERSION}" "${Q_ARCH}" -O "$HOME/Qt" -m ${HAVE}
             else
               echo "Installing core Qt ${QT_VERSION} ${Q_ARCH}"
@@ -97,11 +107,13 @@ jobs:
             echo "Qt already present in ~/Qt/${QT_VERSION}/(macos|${Q_ARCH}), skipping download."
           fi
 
+          # Resolve actual install dir used by aqt (mac desktop commonly ends up under 'macos')
           if [ -d "$HOME/Qt/${QT_VERSION}/macos" ]; then
             QT_DIR="$HOME/Qt/${QT_VERSION}/macos"
           elif [ -d "$HOME/Qt/${QT_VERSION}/${Q_ARCH}" ]; then
             QT_DIR="$HOME/Qt/${QT_VERSION}/${Q_ARCH}"
           else
+            # Fallback: first subdir under ~/Qt/<ver>
             QT_DIR="$(find "$HOME/Qt/${QT_VERSION}" -mindepth 1 -maxdepth 1 -type d | head -n1)"
           fi
 
@@ -112,6 +124,10 @@ jobs:
           ls -la "${QT_DIR}/bin" || true
           if [ -x "${QT_DIR}/bin/qmake" ]; then
             "${QT_DIR}/bin/qmake" -v || true
+          fi
+          if [ -f "${QT_DIR}/lib/cmake/Qt6/Qt6Config.cmake" ]; then
+            echo "Found Qt6Config: ${QT_DIR}/lib/cmake/Qt6/Qt6Config.cmake"
+            grep -E '^set\(PACKAGE_VERSION' -n "${QT_DIR}/lib/cmake/Qt6/Qt6ConfigVersion.cmake" || true
           fi
 
       - name: Ensure Ninja (no Homebrew)
@@ -126,6 +142,7 @@ jobs:
           set -eux
           echo "CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
           ls -la "${CMAKE_PREFIX_PATH}" || true
+          test -f "${CMAKE_PREFIX_PATH}/lib/cmake/Qt6/Qt6Config.cmake"
           mkdir -p build
           cd build
           cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
