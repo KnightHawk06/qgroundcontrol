@@ -6,6 +6,9 @@ on:
       - issue-7133-macos-test
   pull_request:
 
+env:
+  QT_VERSION: "6.5.3"   # adjust if your project expects a different Qt 6.x
+
 jobs:
   build-macos:
     runs-on: macos-latest
@@ -16,34 +19,41 @@ jobs:
         run: |
           which cmake || true
           cmake --version || true
-          brew --version
           uname -a
 
-      - name: Prepare Homebrew and resolve cmake tap conflict
+      - name: Cache Qt
+        uses: actions/cache@v4
+        with:
+          path: ~/Qt
+          key: qt-${{ runner.os }}-${{ env.QT_VERSION }}
+
+      - name: Install aqtinstall (Qt downloader)
         run: |
-          set -eux
-          brew update
-          # Remove preinstalled cmake (from pinned/local tap) so qt@6 can depend on core cmake
-          if brew list --versions cmake >/dev/null 2>&1; then
-            brew uninstall --ignore-dependencies --force cmake
+          python3 -m pip install --user --upgrade aqtinstall
+
+      - name: Install Qt ${{ env.QT_VERSION }} with modules (no Homebrew)
+        run: |
+          if [ ! -d "$HOME/Qt/${QT_VERSION}/macos" ]; then
+            python3 -m aqt install-qt mac desktop "${QT_VERSION}" -O "$HOME/Qt" \
+              --modules qtdeclarative,qtquickcontrols2,qtpositioning,qtserialport,qtmultimedia,qtsvg,qtlocation,qtshadertools
           fi
-          brew install cmake
-          brew install ninja qt@6
-          echo "Qt prefix: $(brew --prefix qt@6)"
-          cmake --version
+          ls -la "$HOME/Qt/${QT_VERSION}/macos"
+
+      - name: Ensure Ninja exists (preinstalled on runner)
+        run: |
+          ninja --version || brew install ninja
 
       - name: Configure (CMake + Qt6)
+        env:
+          CMAKE_PREFIX_PATH: ${{ runner.home }}/Qt/${{ env.QT_VERSION }}/macos
         run: |
-          set -eux
-          mkdir build
+          mkdir -p build
           cd build
           cmake .. \
             -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
+            -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: |
-          set -eux
           cd build
           ninja -v
