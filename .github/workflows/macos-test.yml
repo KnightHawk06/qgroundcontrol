@@ -12,21 +12,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Show toolchain
+        run: |
+          which cmake || true
+          cmake --version
+          brew --version
+          uname -a
+
+      - name: Install dependencies (no cmake)
         run: |
           brew update
-          brew upgrade cmake
           brew install ninja qt@6
-          echo "Qt installed at $(brew --prefix qt@6)"
+          echo "Qt prefix: $(brew --prefix qt@6)"
 
-      - name: Configure CMake
+      - name: Configure (CMake + Qt6)
         run: |
           mkdir build
           cd build
           cmake .. \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH=$(brew --prefix qt@6)
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
 
       - name: Build
         run: |
