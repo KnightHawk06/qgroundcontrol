@@ -15,18 +15,26 @@ jobs:
       - name: Show toolchain
         run: |
           which cmake || true
-          cmake --version
+          cmake --version || true
           brew --version
           uname -a
 
-      - name: Install dependencies (no cmake)
+      - name: Prepare Homebrew and resolve cmake tap conflict
         run: |
+          set -eux
           brew update
+          # Remove preinstalled cmake (from pinned/local tap) so qt@6 can depend on core cmake
+          if brew list --versions cmake >/dev/null 2>&1; then
+            brew uninstall --ignore-dependencies --force cmake
+          fi
+          brew install cmake
           brew install ninja qt@6
           echo "Qt prefix: $(brew --prefix qt@6)"
+          cmake --version
 
       - name: Configure (CMake + Qt6)
         run: |
+          set -eux
           mkdir build
           cd build
           cmake .. \
@@ -36,5 +44,6 @@ jobs:
 
       - name: Build
         run: |
+          set -eux
           cd build
           ninja -v
